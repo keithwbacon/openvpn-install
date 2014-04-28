@@ -5,32 +5,51 @@
 # it will probably work if you simply want to setup a VPN on your Debian/Ubuntu
 # VPS. It has been designed to be as unobtrusive and universal as possible.
 
-
 if [ $USER != 'root' ]; then
 	echo "Sorry, you need to run this as root"
 	exit
 fi
-
 
 if [ ! -e /dev/net/tun ]; then
 	echo "TUN/TAP is not available"
 	exit
 fi
 
-
 if [ ! -e /etc/debian_version ]; then
 	echo "Looks like you aren't running this installer on a Debian-based system"
 	exit
 fi
-
 
 # Try to get our IP from the system and fallback to the Internet.
 # I do this to make the script compatible with NATed servers (lowendspirit.com)
 # and to avoid getting an IPv6.
 IP=$(ifconfig | grep 'inet addr:' | grep -v inet6 | grep -vE '127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut -d: -f2 | awk '{ print $1}' | head -1)
 if [ "$IP" = "" ]; then
-		IP=$(wget -qO- ipv4.icanhazip.com)
+	IP=$(wget -qO- ipv4.icanhazip.com)
 fi
+
+function newclient
+{
+	cd /etc/openvpn/easy-rsa/2.0/
+	source ./vars
+	# build-key for the client
+	export KEY_CN="$1"
+	export EASY_RSA="${EASY_RSA:-.}"
+	"$EASY_RSA/pkitool" $1
+	# Let's generate the client config
+	mkdir -p ~/ovpn-clients/ovpn-$1
+	cd ~/ovpn-clients/ovpn-$1
+	cp /usr/share/doc/openvpn/examples/sample-config-files/client.conf $1.ovpn
+	cp /etc/openvpn/easy-rsa/2.0/keys/ca.crt ca.crt
+	cp /etc/openvpn/easy-rsa/2.0/keys/$1.crt $1.crt
+	cp /etc/openvpn/easy-rsa/2.0/keys/$1.key $1.key
+	sed -i "s|cert client.crt|cert $1.crt|" $1.ovpn
+	sed -i "s|key client.key|key $1.key|" $1.ovpn
+	zip ../ovpn-$1.zip $1.ovpn ca.crt $1.crt $1.key
+	rm -rf ../ovpn-$1
+	echo ""
+	echo "Client $1 added, certs available at ~/ovpn-$1.tar.gz"
+}
 
 
 if [ -e /etc/openvpn/server.conf ]; then
@@ -47,31 +66,12 @@ if [ -e /etc/openvpn/server.conf ]; then
 		echo ""
 		read -p "Select an option [1-4]: " option
 		case $option in
-			1) 
+			1)
 			echo ""
 			echo "Tell me a name for the client cert"
 			echo "Please, use one word only, no special characters"
 			read -p "Client name: " -e -i client CLIENT
-			cd /etc/openvpn/easy-rsa/2.0/
-			source ./vars
-			# build-key for the client
-			export KEY_CN="$CLIENT"
-			export EASY_RSA="${EASY_RSA:-.}"
-			"$EASY_RSA/pkitool" $CLIENT
-			# Let's generate the client config
-			mkdir ~/ovpn-$CLIENT
-			cp /usr/share/doc/openvpn/examples/sample-config-files/client.conf ~/ovpn-$CLIENT/$CLIENT.conf
-			cp /etc/openvpn/easy-rsa/2.0/keys/ca.crt ~/ovpn-$CLIENT
-			cp /etc/openvpn/easy-rsa/2.0/keys/$CLIENT.crt ~/ovpn-$CLIENT
-			cp /etc/openvpn/easy-rsa/2.0/keys/$CLIENT.key ~/ovpn-$CLIENT
-			cd ~/ovpn-$CLIENT
-			sed -i "s|cert client.crt|cert $CLIENT.crt|" $CLIENT.conf
-			sed -i "s|key client.key|key $CLIENT.key|" $CLIENT.conf
-			tar -czf ../ovpn-$CLIENT.tar.gz $CLIENT.conf ca.crt $CLIENT.crt $CLIENT.key
-			cd ~/
-			rm -rf ovpn-$CLIENT
-			echo ""
-			echo "Client $CLIENT added, certs available at ~/ovpn-$CLIENT.tar.gz"
+			newclient $CLIENT
 			exit
 			;;
 			2)
@@ -131,7 +131,7 @@ else
 	echo "Okay, that was all I needed. We are ready to setup your OpenVPN server now"
 	read -n1 -r -p "Press any key to continue..."
 	apt-get update
-	apt-get install openvpn iptables openssl -y
+	apt-get install openvpn iptables openssl zip unzip -y
 	cp -R /usr/share/doc/openvpn/examples/easy-rsa/ /etc/openvpn
 	# easy-rsa isn't available by default for Debian Jessie and newer
 	if [ ! -d /etc/openvpn/easy-rsa/2.0/ ]; then
@@ -148,6 +148,7 @@ else
 	# Fuck you NSA - 1024 bits was the default for Debian Wheezy and older
 	sed -i 's|export KEY_SIZE=1024|export KEY_SIZE=2048|' /etc/openvpn/easy-rsa/2.0/vars
 	# Create the PKI
+	editor /etc/openvpn/easy-rsa/2.0/vars
 	. /etc/openvpn/easy-rsa/2.0/vars
 	. /etc/openvpn/easy-rsa/2.0/clean-all
 	# The following lines are from build-ca. I don't use that script directly
@@ -158,10 +159,6 @@ else
 	# Same as the last time, we are going to run build-key-server
 	export EASY_RSA="${EASY_RSA:-.}"
 	"$EASY_RSA/pkitool" --server server
-	# Now the client keys. We need to set KEY_CN or the stupid pkitool will cry
-	export KEY_CN="$CLIENT"
-	export EASY_RSA="${EASY_RSA:-.}"
-	"$EASY_RSA/pkitool" $CLIENT
 	# DH params
 	. /etc/openvpn/easy-rsa/2.0/build-dh
 	# Let's configure the server
@@ -191,8 +188,6 @@ else
 	sed -i "/# By default this script does nothing./a\iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -j SNAT --to $IP" /etc/rc.local
 	# And finally, restart OpenVPN
 	/etc/init.d/openvpn restart
-	# Let's generate the client config
-	mkdir ~/ovpn-$CLIENT
 	# Try to detect a NATed connection and ask about it to potential LowEndSpirit
 	# users
 	EXTERNALIP=$(wget -qO- ipv4.icanhazip.com)
@@ -210,19 +205,9 @@ else
 	# IP/port set on the default client.conf so we can add further users
 	# without asking for them
 	sed -i "s|remote my-server-1 1194|remote $IP $PORT|" /usr/share/doc/openvpn/examples/sample-config-files/client.conf
-	cp /usr/share/doc/openvpn/examples/sample-config-files/client.conf ~/ovpn-$CLIENT/$CLIENT.conf
-	cp /etc/openvpn/easy-rsa/2.0/keys/ca.crt ~/ovpn-$CLIENT
-	cp /etc/openvpn/easy-rsa/2.0/keys/$CLIENT.crt ~/ovpn-$CLIENT
-	cp /etc/openvpn/easy-rsa/2.0/keys/$CLIENT.key ~/ovpn-$CLIENT
-	cd ~/ovpn-$CLIENT
-	sed -i "s|cert client.crt|cert $CLIENT.crt|" $CLIENT.conf
-	sed -i "s|key client.key|key $CLIENT.key|" $CLIENT.conf
-	tar -czf ../ovpn-$CLIENT.tar.gz $CLIENT.conf ca.crt $CLIENT.crt $CLIENT.key
-	cd ~/
-	rm -rf ovpn-$CLIENT
+	newClient $CLIENT
 	echo ""
 	echo "Finished!"
 	echo ""
-	echo "Your client config is available at ~/ovpn-$CLIENT.tar.gz"
 	echo "If you want to add more clients, you simply need to run this script another time!"
 fi
