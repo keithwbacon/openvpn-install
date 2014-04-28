@@ -205,7 +205,7 @@ else
 	# IP/port set on the default client.conf so we can add further users
 	# without asking for them
 	sed -i "s|remote my-server-1 1194|remote $IP $PORT|" /usr/share/doc/openvpn/examples/sample-config-files/client.conf
-	newClient $CLIENT
+	newclient $CLIENT
 	echo ""
 	echo "Finished!"
 	echo ""
