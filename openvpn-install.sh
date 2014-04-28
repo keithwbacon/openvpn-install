@@ -20,14 +20,6 @@ if [ ! -e /etc/debian_version ]; then
 	exit
 fi
 
-# Try to get our IP from the system and fallback to the Internet.
-# I do this to make the script compatible with NATed servers (lowendspirit.com)
-# and to avoid getting an IPv6.
-IP=$(ifconfig | grep 'inet addr:' | grep -v inet6 | grep -vE '127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut -d: -f2 | awk '{ print $1}' | head -1)
-if [ "$IP" = "" ]; then
-	IP=$(wget -qO- ipv4.icanhazip.com)
-fi
-
 function newclient
 {
 	cd /etc/openvpn/easy-rsa/2.0/
@@ -48,7 +40,7 @@ function newclient
 	zip ../ovpn-$1.zip $1.ovpn ca.crt $1.crt $1.key
 	rm -rf ../ovpn-$1
 	echo ""
-	echo "Client $1 added, certs available at ~/ovpn-$1.tar.gz"
+	echo "Client $1 added, certs available at ~/ovpn-clients/ovpn-$1.zip"
 }
 
 
@@ -103,7 +95,9 @@ if [ -e /etc/openvpn/server.conf ]; then
 			echo "OpenVPN removed!"
 			exit
 			;;
-			4) exit;;
+			4)
+			exit
+			;;
 		esac
 	done
 else
@@ -113,6 +107,13 @@ else
 	echo "I need to ask you a few questions before starting the setup"
 	echo "You can leave the default options and just press enter if you are ok with them"
 	echo ""
+	# Try to get our IP from the system and fallback to the Internet.
+	# I do this to make the script compatible with NATed servers (lowendspirit.com)
+	# and to avoid getting an IPv6.
+	IP=$(ifconfig | grep 'inet addr:' | grep -v inet6 | grep -vE '127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut -d: -f2 | awk '{ print $1}' | head -1)
+	if [ "$IP" = "" ]; then
+		IP=$(wget -qO- ipv4.icanhazip.com)
+	fi
 	echo "First I need to know the IPv4 address of the network interface you want OpenVPN"
 	echo "listening to."
 	read -p "IP address: " -e -i $IP IP
